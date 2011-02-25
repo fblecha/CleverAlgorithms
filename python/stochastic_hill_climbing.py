@@ -31,6 +31,8 @@ def search(max_iterations, num_bits):
         neighbor['vector'] = random_neighbor(candidate['vector'])
         neighbor['cost'] = onemax(neighbor['vector'])
         candidate = neighbor if neighbor['cost'] >= candidate['cost'] else candidate
+
+        # save off all candidates that we searched in a tuple (iter, vector, cost)
         all_candidates.append( (i, candidate['vector'], candidate['cost']) )
        
         if candidate['cost'] == num_bits:
@@ -44,7 +46,7 @@ if __name__ == "__main__":
 
     #random.seed(0)#make it repeatable
 
-    num_bits = 4
+    num_bits = 128
     max_iter = 1000
     best, all_candidates = search(max_iter, num_bits)
 
