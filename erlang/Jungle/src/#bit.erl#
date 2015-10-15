@@ -1,0 +1,28 @@
+-module(jungle).
+-export([test/0]).
+
+
+binary_comprehension(B,F) ->
+    Fun = fun(B,F) ->
+		  case B of 
+		      << Seg1, Rest/binary >> ->
+			  case FilterExpr* of 
+			      true ->
+				   <<Seg,F(Rest,F)>>;
+			      false ->
+				  F(Rest,F)
+			  end;
+		      <<>> ->
+			  <<>>
+			      end
+	  end,
+    
+
+		   
+		  
+		  
+    
+
+
+
+

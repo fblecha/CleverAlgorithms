@@ -1,0 +1,281 @@
+-module(jungle).
+-export([test/0, test2/0, test3/0, profile/0]).
+-import(string_metrics, [levenshtein/2]).
+-import(random).
+-import(lists).
+-import(io).
+-import(map_bin).
+-import(bin_util).
+-import(barn).
+-import(stat).
+-import(fprof).
+
+%% @type chromosomes() = {chromosomes, binary()}
+%% @type fitness() = {fitness, float()}
+%% @type individual() = {individual, chromosomes(), fitness()}
+
+
+profile() ->
+    fprof:apply(jungle, test,[]),
+    fprof:profile(),
+    fprof:analyse().
+
+test3() ->
+    A = bin_util:bit_count(14),
+    io:fwrite("A = ~p~n",[A]).
+
+
+
+test2() ->
+    random:seed(1,2,3),
+    A = create_individual(),
+    B = create_individual(),
+    {C,D} = crossover(A,B),
+    io:fwrite("A = ~p~n",[A]),
+    io:fwrite("B = ~p~n",[B]),
+    io:fwrite("C = ~p~n",[C]),
+    io:fwrite("D = ~p~n",[D]).
+
+test() ->
+    random:seed(1,2,3),
+
+    NumberOfGenerations = 5,
+    Population_Size = 1000,
+    PercentKeptPerGeneration = 0.5,
+
+
+    Default_Individual_Creator = fun() -> create_individual() end,
+    Initial_Population = create_random_list(Population_Size, Default_Individual_Creator, []),
+    io:fwrite("Initial Population = ~p~n",[length(Initial_Population)]),
+
+    io:fwrite("% kept = ~p~n",[PercentKeptPerGeneration]),
+    experiment(NumberOfGenerations,Population_Size, PercentKeptPerGeneration, Initial_Population).
+
+experiment(NumberOfGenerations, Max_Population_Size, PercentKeptPerGeneration, Initial_Population) ->
+    evaluate_generation(NumberOfGenerations, Initial_Population, PercentKeptPerGeneration,Max_Population_Size).
+
+evaluate_generation(0, Population, _,_) -> 
+    Population;
+evaluate_generation(NumberOfGenerationsLeft, Population, PercentKeptPerGeneration, MaxPopulationSize) ->
+    io:fwrite("---------------~n"),
+    io:fwrite("Gen = ~p~n",[NumberOfGenerationsLeft]),
+    io:fwrite("Measuring population fitness ~n",[]),
+
+    RankedPopulation = measure_population_fitness(Population,<<"Frank">>),
+    Partition = round(MaxPopulationSize*PercentKeptPerGeneration),
+    {Winners,Losers} = lists:split(Partition, RankedPopulation),
+
+    io:fwrite("Winners length = ~p~n",[length(Winners)]),
+    io:fwrite("Avg Population Fitness = ~p~n",[average_fitness(RankedPopulation)]),
+    io:fwrite("1st Place = ~p~n",[lists:nth(1,Winners)]),
+    io:fwrite("2nd Place = ~p~n",[lists:nth(2,Winners)]),
+
+    if 
+	length(Winners) > 3 ->
+	    io:fwrite("3rd Place = ~p~n",[lists:nth(3,Winners)]);
+	true  -> []
+    end,
+    
+
+    NextPopulation = make_next_generation(Winners, MaxPopulationSize),
+
+    io:fwrite("Next Population Size = ~p~n",[length(NextPopulation)]),
+
+    %%XXX need to mutate the population
+    evaluate_generation(NumberOfGenerationsLeft - 1, NextPopulation, PercentKeptPerGeneration,MaxPopulationSize).
+
+
+average_fitness(Population) ->
+    Fitness = fun(Elem) -> get_individual_fitness(Elem) end,
+    stat:avg(Population, Fitness).
+
+
+mate({ParentA, ParentB}) ->
+    {OffspringA, OffspringB} = crossover(ParentA,ParentB),
+    %%[ParentA, ParentB, OffspringA, OffspringB].
+    [OffspringA, OffspringB].
+
+
+make_child(Population) ->
+    Population_Size = length(Population),
+
+    ParentA = lists:nth(random:uniform(Population_Size) , Population),
+    ParentB = lists:nth(random:uniform(Population_Size) , Population),
+    
+    [ChildA, ChildB ] = mate( {ParentA, ParentB} ),
+    OffSpring = barn:random_select( [ChildA, ChildB], 1),
+    OffSpring.
+
+
+
+make_N_children(Population,From,To) when From < To ->
+    [ make_child(Population) | make_N_children(Population,From+1,To)];
+make_N_children(Population,From,From) ->
+    [make_child(Population)].
+
+
+make_next_generation(Initial_Population, MaxPopulationSize) ->
+    NumberOfOffspringToProduce = MaxPopulationSize - length(Initial_Population),    
+
+    io:fwrite("offspring to produce = ~p~n",[NumberOfOffspringToProduce]),
+
+    Children = make_N_children(Initial_Population, 1, NumberOfOffspringToProduce),
+    lists:flatten( [ Initial_Population, Children ] ).
+
+mate_population(Couples) ->
+    %%we'll have pairs(tuples) in this "population"(aka list)
+    Mate = fun(X) -> mate(X) end,
+    NextGen = lists:flatten(lists:map( Mate, Couples)),
+    NextGen.
+
+measure_population_fitness(Population, Goal) ->
+    Cost = fun(Individual) -> evaluate_individual2(Individual,Goal) end,
+    SortByMaxFitness = fun(A,B) -> sort_by_max_fitness(A,B) end,
+    lists:sort(SortByMaxFitness, lists:map(Cost,Population)).
+
+%%this should really be assign new fitness XXX    
+create_new_individual(Individual,NewFitness) ->
+    {_, {_,Chromosomes},{_,_}} = Individual,
+    {individual,{chromosomes,Chromosomes},{fitness,NewFitness}}.
+
+get_individual_fitness(Individual) ->
+    {_, {_,_},{_,Fitness}} = Individual,
+    Fitness.
+
+
+sort_by_max_fitness(IndividualA,IndividualB) ->
+    {_, {_,_},{_,FitnessA}} = IndividualA,
+    {_, {_,_},{_,FitnessB}} = IndividualB,
+	if
+    	FitnessA > FitnessB -> true;
+        true -> false
+    end.
+                           
+create_random_list(N,Fun,[]) -> 
+	create_random_list(N-1, Fun, [Fun()]);
+
+create_random_list(N, Fun, List) ->
+    case N of 
+        0 -> lists:reverse(List);%%done
+        _ -> create_random_list(N-1, Fun,[ Fun() | List ]) 
+	end.
+
+create_individual() -> 	
+    NumberOfChromosomes = 5,
+    Create = fun() -> random:uniform(200) end, %%XXX
+    Individual = {individual, 
+                  {chromosomes, list_to_binary(create_random_list(NumberOfChromosomes,Create,[]))},
+                  {fitness,-1000000}
+                  },
+    Individual.
+
+
+evaluate_individual2(Individual, Goal) ->
+    {_, {_,Chromosomes},{_,_}} = Individual,
+
+    <<A:40>> = Chromosomes,
+    <<B:40>> = Goal,
+    HammingDistance = bin_util:bit_count( A bxor B ),
+    Fitness = HammingDistance * -1,
+    NewIndividual = create_new_individual(Individual,Fitness),
+    NewIndividual.
+
+
+
+evaluate_individual(Individual, Goal) ->
+    {_, {_,Chromosomes},{_,_}} = Individual,
+    NonPrintableCharacter = fun(X) -> 
+				    if
+					X > 96, X < 123 -> 0;
+					true -> 1
+				    end
+			    end,
+    %%io:fwrite("Evaluate Chromosomes = ~p~n",[Chromosomes]),
+    Hack = fun(<<Elem:8>>) -> NonPrintableCharacter(Elem) end,
+    NonPrintableCharacterCount = lists:sum(bin_util:map_bin(Hack,Chromosomes,1)),
+
+    if 
+	NonPrintableCharacterCount =:= 0 -> 
+	    %%io:fwrite("Chromosomes ~p~n",[Chromosomes]),
+	    %%io:fwrite("Goal ~p~n",[Goal]),
+	    
+	    HackGoal = <<Goal>>,
+
+            TempFitness = string_metrics:levenshtein(binary_to_list(Chromosomes),HackGoal),
+	    if 
+		TempFitness > 0 -> 
+		    NewFitness = -1 * TempFitness;
+		true ->
+		    NewFitness = TempFitness %%should be the right one
+	    end;
+	true ->
+            %% we're composed of entirely nonprintable characters
+            NewFitness = -1 * (NonPrintableCharacterCount * 10)
+    end,
+    
+    NewIndividual = create_new_individual(Individual,NewFitness),
+    %%io:fwrite("NewIndividual = ~p~n",[NewIndividual]),
+    NewIndividual.
+
+
+%% @spec crossover(individual(),individual()) -> {individual(),individual()}
+crossover(ParentA,ParentB) ->
+    %%it doesn't matter which parent is chosen here, they'll both have the same # of chromosomes
+    {_, {_,Chromosomes},{_,_}} = ParentA,
+
+    NumberBytes = size(Chromosomes),
+    NumberBits = NumberBytes * 8,
+
+
+    Location2 = random:uniform(NumberBytes),
+
+    Location = random:uniform(NumberBytes),
+
+    BitLocation = Location * 8,
+    %%io:fwrite("Location = ~p~n",[Location]),
+    %%io:fwrite("BitLocation = ~p~n",[BitLocation]),
+
+    {_, {_,ParentA_Chromosomes},{_,_}} = ParentA,
+    {_, {_,ParentB_Chromosomes},{_,_}} = ParentB,
+
+    LeftSize = BitLocation,
+    RightSize = NumberBits - LeftSize,
+    <<LeftSideA:LeftSize, RightSideA:RightSize>> = ParentA_Chromosomes,
+    <<LeftSideB:LeftSize, RightSideB:RightSize>> = ParentB_Chromosomes,
+    AB_Chromosomes = <<LeftSideA:LeftSize, RightSideB:RightSize>>,
+    BA_Chromosomes = <<LeftSideB:LeftSize, RightSideA:RightSize>>,    
+
+    OffspringAB = {individual,{chromosomes,AB_Chromosomes},{fitness,-10000}},
+    OffspringBA = {individual,{chromosomes,BA_Chromosomes},{fitness,-10000}},
+
+    %%io:fwrite("A = ~p~n",[ParentA]),
+    %%io:fwrite("B = ~p~n",[ParentB]),
+    %%io:fwrite("AB = ~p~n",[OffspringAB]),
+    %%io:fwrite("BA = ~p~n",[OffspringBA]),
+
+    {OffspringAB, OffspringBA}.
+
+    
+mutate(Individual, PerBitMutationRate) ->
+%%when release 12 is out, I may want to revisit this with binary comprehensions
+%%for now, I'm going to mutate 8bit integers, so we'll do MutationRate * 8 
+    Mutate = fun(X) ->
+		     RandomPull = random:uniform(),
+		     
+		     if
+			 RandomPull =< (PerBitMutationRate * 8)  ->
+			     Result = random:uniform(255);
+			 true  ->
+			     Result = X
+		     end,
+		     Result
+	     end,
+    {_, {_,Chromosomes},{_,_}} = Individual,
+    NewChromosomes = lists:map(Mutate, Chromosomes),
+    Individual = {individual, 
+                  {chromosomes, list_to_binary(NewChromosomes)},
+                  {fitness,-1000000}
+                  },
+    Individual.
+
+
